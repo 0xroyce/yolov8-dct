@@ -7,6 +7,7 @@ import os
 import uuid
 import time
 import json
+import threading
 
 
 class ObjectDetector:
@@ -16,22 +17,29 @@ class ObjectDetector:
         self.unknown_objects = {}
         self.photo_dir = "unknown_objects"
         os.makedirs(self.photo_dir, exist_ok=True)
-        self.photos_per_object = 100  # Increased to 100
-        self.capture_interval = 0.05  # Decreased to 0.05 seconds
+        self.photos_per_object = 100
+        self.capture_interval = 0.05
         self.confidence_threshold = 0.2
         self.capturing = False
         self.capture_start_time = 0
         self.current_unknown_box = None
         self.current_unknown_class = None
+        self.frame = None
+        self.annotated_frame = None
+        self.capture_thread = None
 
     def generate_name(self):
         return f"Unknown_{uuid.uuid4().hex[:8]}"
 
-    def capture_photos(self, frame, name):
+    def capture_photos(self, name):
         object_dir = os.path.join(self.photo_dir, name)
         os.makedirs(object_dir, exist_ok=True)
 
         for i in range(self.photos_per_object):
+            if self.frame is None:
+                continue
+
+            frame = self.frame.copy()
             results = self.model(frame, conf=self.confidence_threshold)
             updated_box = None
             for r in results:
@@ -61,17 +69,12 @@ class ObjectDetector:
             print(f"Captured photo: {path}")
             time.sleep(self.capture_interval)
 
-            if i < self.photos_per_object - 1:
-                success, frame = self.cap.read()
-                if not success:
-                    break
-
         self.capturing = False
         self.current_unknown_box = None
         self.current_unknown_class = None
-        return frame
 
     def detect_and_capture(self, frame):
+        self.frame = frame
         results = self.model(frame, conf=self.confidence_threshold)
         annotated_frame = frame.copy()
 
@@ -83,14 +86,15 @@ class ObjectDetector:
                 if conf > self.confidence_threshold:
                     x1, y1, x2, y2 = map(int, box)
                     if detected_class not in self.known_objects:
-                        if detected_class not in self.unknown_objects:
+                        if detected_class not in self.unknown_objects and not self.capturing:
                             new_name = self.generate_name()
                             self.unknown_objects[detected_class] = new_name
                             self.capturing = True
                             self.capture_start_time = time.time()
                             self.current_unknown_box = box.tolist()
                             self.current_unknown_class = detected_class
-                            self.capture_photos(frame, new_name)
+                            self.capture_thread = threading.Thread(target=self.capture_photos, args=(new_name,))
+                            self.capture_thread.start()
                             print(f"New unknown object detected: {detected_class}")
 
                         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
@@ -107,22 +111,23 @@ class ObjectDetector:
             cv2.putText(annotated_frame, f"Unknown object detected! Capturing images... {remaining_time:.1f}s",
                         (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        return annotated_frame
+        self.annotated_frame = annotated_frame
 
     def run(self):
-        self.cap = cv2.VideoCapture(0)
+        cap = cv2.VideoCapture(0)
 
-        while self.cap.isOpened():
-            success, frame = self.cap.read()
+        while cap.isOpened():
+            success, frame = cap.read()
             if success:
-                annotated_frame = self.detect_and_capture(frame)
-                cv2.imshow("Object Detection", annotated_frame)
+                self.detect_and_capture(frame)
+                if self.annotated_frame is not None:
+                    cv2.imshow("Object Detection", self.annotated_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
             else:
                 break
 
-        self.cap.release()
+        cap.release()
         cv2.destroyAllWindows()
 
 

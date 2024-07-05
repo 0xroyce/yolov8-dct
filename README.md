@@ -1,6 +1,8 @@
 
 # YOLOv8 Object Detection, Cropping, and Classification
 
+**#################### PROJECT IS IN DEVELOPMENT ####################**
+
 This repository contains a set of Python scripts for detecting objects using YOLOv8, capturing images of unknown objects, cropping those images based on detected bounding boxes, and automatically classifying the cropped images using clustering.
 
 ## Table of Contents
